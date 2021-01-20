@@ -2,6 +2,8 @@
 
 The extension workflow for [dsbulk](https://github.com/datstax/dsbulk) that works similar to `unload` workflow, but instead of writing out records, this workflow writes the size of columns.
 
+Currently, only tested with dsbulk v1.7.0.
+
 Primary usage for this is to find out if the table has large columns and the size of the column is above [DataStax Astra's column size limitation (5MB)](https://docs.astra.datastax.com/docs/datastax-astra-database-limits).
 
 Since some column types are fixed size, only the column of the following types are writen.

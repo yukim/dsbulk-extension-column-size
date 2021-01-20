@@ -1,0 +1,37 @@
+plugins {
+    id 'java'
+    id "com.diffplug.spotless" version "5.9.0"
+}
+
+group 'com.datastax.oss'
+version '0.1-SNAPSHOT'
+
+repositories {
+    mavenCentral()
+}
+
+spotless {
+    java {
+        importOrder()
+        removeUnusedImports()
+        googleJavaFormat()
+    }
+}
+
+dependencies {
+    implementation platform('io.projectreactor:reactor-bom:Dysprosium-SR1')
+    implementation platform('com.datastax.oss:dsbulk-bom:1.7.0')
+
+    implementation 'io.projectreactor:reactor-core'
+    implementation 'com.datastax.oss:dsbulk-workflow-api'
+    implementation 'com.datastax.oss:dsbulk-workflow-commons'
+    implementation 'com.datastax.oss:dsbulk-executor-api'
+
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.6.0'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine'
+    testImplementation 'com.datastax.oss:dsbulk-tests'
+}
+
+test {
+    useJUnitPlatform()
+}

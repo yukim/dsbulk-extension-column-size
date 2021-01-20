@@ -17,6 +17,10 @@ Since some column types are fixed size, only the column of the following types a
 - udt
 - tuple
 
+## Install
+
+Download the jar file from releases, and put it into `$DSBULK_HOME/lib`. That's it!
+
 ## Usage
 
 ```shell

@@ -45,6 +45,7 @@ public class ColumnSizeWorkflow implements Workflow {
   private static final Logger LOGGER = LoggerFactory.getLogger(ColumnSizeWorkflow.class);
 
   private static final String COLUMN_SIZE_THRESHOLD = "dsbulk.columnSize.columnSizeThreshold";
+  private static final String SKIP_WRITES = "dsbulk.columnSize.skipWrites";
   private static final int DEFAULT_COLUMN_SIZE_THRESHOLD = 5242880;
 
   private final SettingsManager settingsManager;
@@ -74,6 +75,7 @@ public class ColumnSizeWorkflow implements Workflow {
   private int writeConcurrency;
 
   private final int columnSizeThreshold;
+  private final boolean skipWrites;
 
   public ColumnSizeWorkflow(Config config) {
     settingsManager = new SettingsManager(config);
@@ -81,6 +83,11 @@ public class ColumnSizeWorkflow implements Workflow {
       this.columnSizeThreshold = config.getInt(COLUMN_SIZE_THRESHOLD);
     } else {
       this.columnSizeThreshold = DEFAULT_COLUMN_SIZE_THRESHOLD;
+    }
+    if (config.hasPath(SKIP_WRITES)) {
+      this.skipWrites = config.getBoolean(SKIP_WRITES);
+    } else {
+      this.skipWrites = false;
     }
   }
 
@@ -213,31 +220,37 @@ public class ColumnSizeWorkflow implements Workflow {
             ? Schedulers.immediate()
             : Schedulers.newParallel(numThreads, new DefaultThreadFactory("workflow"));
     schedulers.add(scheduler);
-    return Flux.fromIterable(readStatements)
-        .flatMap(
-            results ->
-                Flux.from(executor.readReactive(results))
-                    .publishOn(scheduler, 500)
-                    .transform(queryWarningsHandler)
-                    .transform(totalItemsMonitor)
-                    .transform(totalItemsCounter)
-                    .transform(failedReadResultsMonitor)
-                    .transform(failedReadsHandler)
-                    // Convert to column size record
-                    .map(columnSizeInstpector::map)
-                    // Update column size stats
-                    .transform(columnSizeInstpector::updateStats)
-                    // Retain only those have a column size more than the threshold
-                    .filter(columnSizeInstpector::detectRecordWithLargeColumn)
-                    // Record how many we have
-                    .transform(columnSizeInstpector::countFiltered)
-                    .transform(failedRecordsMonitor)
-                    .transform(unmappableRecordsHandler),
-            readConcurrency,
-            500)
-        .transform(writer)
-        .transform(failedRecordsMonitor)
-        .transform(failedRecordsHandler);
+    Flux<Record> recordFlux =
+        Flux.fromIterable(readStatements)
+            .flatMap(
+                results ->
+                    Flux.from(executor.readReactive(results))
+                        .publishOn(scheduler, 500)
+                        .transform(queryWarningsHandler)
+                        .transform(totalItemsMonitor)
+                        .transform(totalItemsCounter)
+                        .transform(failedReadResultsMonitor)
+                        .transform(failedReadsHandler)
+                        // Convert to column size record
+                        .map(columnSizeInstpector::map)
+                        // Update column size stats
+                        .transform(columnSizeInstpector::updateStats)
+                        // Retain only those have a column size more than the threshold
+                        .filter(columnSizeInstpector::detectRecordWithLargeColumn)
+                        // Record how many we have
+                        .transform(columnSizeInstpector::countFiltered)
+                        .transform(failedRecordsMonitor)
+                        .transform(unmappableRecordsHandler),
+                readConcurrency,
+                500);
+    if (!skipWrites) {
+      recordFlux =
+          recordFlux
+              .transform(writer)
+              .transform(failedRecordsMonitor)
+              .transform(failedRecordsHandler);
+    }
+    return recordFlux;
   }
 
   private Flux<Record> fewWriters() {
@@ -247,44 +260,50 @@ public class ColumnSizeWorkflow implements Workflow {
         numThreadsForReads == 1
             ? Schedulers.immediate()
             : Schedulers.newParallel(numThreadsForReads, new DefaultThreadFactory("workflow-read"));
-    int numThreadsForWrites = Math.min(numCores, writeConcurrency);
-    Scheduler schedulerForWrites =
-        Schedulers.newParallel(numThreadsForWrites, new DefaultThreadFactory("workflow-write"));
     schedulers.add(schedulerForReads);
-    schedulers.add(schedulerForWrites);
-    return Flux.fromIterable(readStatements)
-        .flatMap(
-            results ->
-                Flux.from(executor.readReactive(results))
-                    .publishOn(schedulerForReads, 500)
-                    .transform(queryWarningsHandler)
-                    .transform(totalItemsMonitor)
-                    .transform(totalItemsCounter)
-                    .transform(failedReadResultsMonitor)
-                    .transform(failedReadsHandler)
-                    // Convert to column size record
-                    .map(columnSizeInstpector::map)
-                    // Update column size stats
-                    .transform(columnSizeInstpector::updateStats)
-                    // Retain only those have a column size more than the threshold
-                    .filter(columnSizeInstpector::detectRecordWithLargeColumn)
-                    // Record how many we have
-                    .transform(columnSizeInstpector::countFiltered)
-                    .transform(failedRecordsMonitor)
-                    .transform(unmappableRecordsHandler),
-            readConcurrency,
-            500)
-        .parallel(writeConcurrency)
-        .runOn(schedulerForWrites)
-        .groups()
-        .flatMap(
-            records ->
-                records
-                    .transform(writer)
-                    .transform(failedRecordsMonitor)
-                    .transform(failedRecordsHandler),
-            writeConcurrency,
-            500);
+    Flux<Record> recordFlux =
+        Flux.fromIterable(readStatements)
+            .flatMap(
+                results ->
+                    Flux.from(executor.readReactive(results))
+                        .publishOn(schedulerForReads, 500)
+                        .transform(queryWarningsHandler)
+                        .transform(totalItemsMonitor)
+                        .transform(totalItemsCounter)
+                        .transform(failedReadResultsMonitor)
+                        .transform(failedReadsHandler)
+                        // Convert to column size record
+                        .map(columnSizeInstpector::map)
+                        // Update column size stats
+                        .transform(columnSizeInstpector::updateStats)
+                        // Retain only those have a column size more than the threshold
+                        .filter(columnSizeInstpector::detectRecordWithLargeColumn)
+                        // Record how many we have
+                        .transform(columnSizeInstpector::countFiltered)
+                        .transform(failedRecordsMonitor)
+                        .transform(unmappableRecordsHandler),
+                readConcurrency,
+                500);
+    if (!skipWrites) {
+      int numThreadsForWrites = Math.min(numCores, writeConcurrency);
+      Scheduler schedulerForWrites =
+          Schedulers.newParallel(numThreadsForWrites, new DefaultThreadFactory("workflow-write"));
+      schedulers.add(schedulerForWrites);
+      recordFlux =
+          recordFlux
+              .parallel(writeConcurrency)
+              .runOn(schedulerForWrites)
+              .groups()
+              .flatMap(
+                  records ->
+                      records
+                          .transform(writer)
+                          .transform(failedRecordsMonitor)
+                          .transform(failedRecordsHandler),
+                  writeConcurrency,
+                  500);
+    }
+    return recordFlux;
   }
 
   private Flux<Record> manyWriters() {
@@ -314,18 +333,21 @@ public class ColumnSizeWorkflow implements Workflow {
                       .transform(columnSizeInstpector::countFiltered)
                       .transform(failedRecordsMonitor)
                       .transform(unmappableRecordsHandler);
-              if (actualConcurrency == writeConcurrency) {
-                records = records.transform(writer);
-              } else {
-                // If the actual concurrency is lesser than the connector's desired write
-                // concurrency, we need to give the connector a chance to switch writers
-                // frequently so that it can really redirect records to all the final destinations
-                // (to that many files on disk for example). If the connector is correctly
-                // implemented, each window will be redirected to a different destination
-                // in a round-robin fashion.
-                records = records.window(500).flatMap(window -> window.transform(writer), 1, 500);
+              if (!skipWrites) {
+                if (actualConcurrency == writeConcurrency) {
+                  records = records.transform(writer);
+                } else {
+                  // If the actual concurrency is lesser than the connector's desired write
+                  // concurrency, we need to give the connector a chance to switch writers
+                  // frequently so that it can really redirect records to all the final destinations
+                  // (to that many files on disk for example). If the connector is correctly
+                  // implemented, each window will be redirected to a different destination
+                  // in a round-robin fashion.
+                  records = records.window(500).flatMap(window -> window.transform(writer), 1, 500);
+                }
+                records = records.transform(failedRecordsMonitor).transform(failedRecordsHandler);
               }
-              return records.transform(failedRecordsMonitor).transform(failedRecordsHandler);
+              return records;
             },
             actualConcurrency,
             500);

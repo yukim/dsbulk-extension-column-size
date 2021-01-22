@@ -134,15 +134,16 @@ public class DetectRowWithLargeSize implements ReadResultMapper {
     report.append("=== Column size report ===\n");
     report.append("Total rows: ").append(totalRowCounter.longValue()).append("\n");
     report.append("Above threshold: ").append(aboveThresholdCounter.longValue()).append("\n");
-    report.append("Percentage: ").append(percentage * 100).append("%\n\n");
+    report.append("Percentage: ").append(String.format("%.2f", percentage * 100)).append("%\n\n");
 
     for (Map.Entry<String, Histogram> entry : columnSizeStats.entrySet()) {
       report.append("--- ").append(entry.getKey()).append(" ---\n");
       Snapshot snapshot = entry.getValue().getSnapshot();
-      report.append("Count: ").append(snapshot.size()).append("\n");
       report.append("Min: ").append(snapshot.getMin()).append(" bytes\n");
       report.append("Mean: ").append(snapshot.getMean()).append(" bytes\n");
       report.append("Max: ").append(snapshot.getMax()).append(" bytes\n");
+      report.append("Median: ").append(snapshot.getMedian()).append(" bytes\n");
+      report.append("75%tile: ").append(snapshot.get75thPercentile()).append(" bytes\n");
       report.append("95%tile: ").append(snapshot.get95thPercentile()).append(" bytes\n");
       report.append("99%tile: ").append(snapshot.get99thPercentile()).append(" bytes\n");
       report.append('\n');

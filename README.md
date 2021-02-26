@@ -1,6 +1,6 @@
 # DSBulk workflow for column size statistics
 
-The extension workflow for [dsbulk](https://github.com/datstax/dsbulk) that works similar to `unload` workflow, but instead of writing out records, this workflow writes the size of columns.
+The extension workflow for [dsbulk](https://github.com/datastax/dsbulk) that works similar to `unload` workflow, but instead of writing out records, this workflow writes the size of columns.
 
 Currently, only tested with dsbulk v1.7.0.
 
